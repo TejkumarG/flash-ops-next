@@ -7,8 +7,8 @@ export const FASTAPI_BASE_URL = process.env.FASTAPI_URL || 'http://localhost:800
 
 // FastAPI Endpoints
 export const FASTAPI_ENDPOINTS = {
-  CHAT_COMPLETION: '/chat/completion',
-  SYNC_EMBEDDINGS: '/sync_embeddings',
+  CHAT_COMPLETION: '/api/v1/query',
+  SYNC_EMBEDDINGS: '/api/v1/embeddings/generate',
 } as const;
 
 // Full URLs

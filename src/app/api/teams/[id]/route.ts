@@ -9,7 +9,7 @@ import { successResponse, errorResponse } from '@/lib/api-helpers';
 /**
  * GET /api/teams/[id]
  * Get a single team
- * Admin only
+ * Admin or team member can access
  */
 export async function GET(
   request: NextRequest,
@@ -21,10 +21,6 @@ export async function GET(
       return errorResponse('Unauthorized', 401);
     }
 
-    if (session.user.role !== 'admin') {
-      return errorResponse('Forbidden: Admin access required', 403);
-    }
-
     await connectDB();
 
     const team = await Team.findById(params.id)
@@ -33,6 +29,16 @@ export async function GET(
 
     if (!team) {
       return errorResponse('Team not found', 404);
+    }
+
+    // Check if user is admin or team member
+    const isAdmin = session.user.role === 'admin';
+    const isMember = team.members.some(
+      (member: any) => member._id.toString() === session.user.id
+    );
+
+    if (!isAdmin && !isMember) {
+      return errorResponse('Forbidden: Not a member of this team', 403);
     }
 
     return successResponse({

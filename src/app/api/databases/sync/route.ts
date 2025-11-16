@@ -57,6 +57,11 @@ export async function POST(request: NextRequest) {
     const fastApiUrl = getApiUrl(FASTAPI_ENDPOINTS.SYNC_EMBEDDINGS);
     console.log('FastAPI Sync URL:', fastApiUrl);
 
+    // Determine if this is a re-sync (force regenerate)
+    // If database has already been synced before, default to false (incremental)
+    // Otherwise, it's a first sync (force_regenerate = false is appropriate)
+    const forceRegenerate = body.forceRegenerate ?? false;
+
     try {
       const fastApiResponse = await fetch(fastApiUrl, {
         method: 'POST',
@@ -65,7 +70,8 @@ export async function POST(request: NextRequest) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          database_id: databaseId,
+          db_id: databaseId,
+          force_regenerate: forceRegenerate,
         }),
       });
 
@@ -86,8 +92,10 @@ export async function POST(request: NextRequest) {
         ...database.metadata,
         lastSyncedBy: session.user.id,
         lastSyncResponse: fastApiData,
-        tables: fastApiData.tables || [],
-        embeddingsCount: fastApiData.embeddings_count || 0,
+        tablesProcessed: fastApiData.tables_processed || 0,
+        embeddingsCreated: fastApiData.embeddings_created || 0,
+        indexPath: fastApiData.index_path || '',
+        processingTimeMs: fastApiData.processing_time_ms || 0,
       };
       await database.save();
 

@@ -95,10 +95,8 @@ export async function POST(
 
     // Prepare parameters for FastAPI
     const fastApiPayload = {
-      chatId: params.id,
-      databaseIds: chat.databaseIds.map((db: any) => db._id.toString()),
-      message: message.trim(),
-      stream: true,
+      database_ids: chat.databaseIds.map((db: any) => db._id.toString()),
+      query: message.trim(),
     };
 
     console.log('Calling FastAPI with payload:', fastApiPayload);
@@ -108,6 +106,10 @@ export async function POST(
       const fastApiUrl = getApiUrl(FASTAPI_ENDPOINTS.CHAT_COMPLETION);
       console.log('FastAPI URL:', fastApiUrl);
 
+      // Create AbortController for timeout
+      const abortController = new AbortController();
+      const timeoutId = setTimeout(() => abortController.abort(), 100000); // 100 seconds
+
       const fastApiResponse = await fetch(fastApiUrl, {
         method: 'POST',
         headers: {
@@ -115,7 +117,10 @@ export async function POST(
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(fastApiPayload),
+        signal: abortController.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!fastApiResponse.ok) {
         const errorText = await fastApiResponse.text();
@@ -124,7 +129,10 @@ export async function POST(
       }
 
       // Handle streaming response
-      if (fastApiPayload.stream && fastApiResponse.body) {
+      const contentType = fastApiResponse.headers.get('content-type');
+      const isStreaming = contentType?.includes('text/event-stream') || contentType?.includes('application/x-ndjson');
+
+      if (isStreaming && fastApiResponse.body) {
         // Return streaming response to client
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
@@ -134,7 +142,7 @@ export async function POST(
               const decoder = new TextDecoder();
               let fullResponse = '';
               let sqlQuery = '';
-              let filePath = '';
+              let queryResults: any[] = [];
 
               while (true) {
                 const { done, value } = await reader.read();
@@ -148,6 +156,7 @@ export async function POST(
                   if (line.startsWith('data: ')) {
                     try {
                       const data = JSON.parse(line.slice(6));
+                      console.log('Received SSE data from FastAPI:', data);
 
                       // Extract chunk text and accumulate with space between chunks
                       if (data.chunk && data.chunk.trim()) {
@@ -163,9 +172,12 @@ export async function POST(
                       // Check for completion
                       if (data.is_complete) {
                         sqlQuery = data.sql_query || data.sqlQuery || '';
-                        filePath = data.file_path || '';
-                        console.log('Stream complete. Full response:', fullResponse);
+                        queryResults = data.queryResults || data.results || data.query_results || [];
+                        console.log('=== Stream complete ===');
+                        console.log('Full response:', fullResponse);
                         console.log('SQL Query:', sqlQuery);
+                        console.log('Query Results length:', queryResults.length);
+                        console.log('Query Results:', JSON.stringify(queryResults, null, 2));
                       }
                     } catch (e) {
                       console.error('Failed to parse SSE line:', e, line);
@@ -177,14 +189,17 @@ export async function POST(
               // Update message with accumulated response
               messageDoc.assistantMessage = fullResponse;
               messageDoc.sqlQuery = sqlQuery;
+              messageDoc.queryResults = queryResults;
               await messageDoc.save();
 
-              // Send completion signal
+              // Send completion signal with queryResults
+              console.log('Sending completion signal with queryResults:', queryResults);
               controller.enqueue(
                 encoder.encode(`data: ${JSON.stringify({
                   is_complete: true,
                   messageId: messageDoc._id,
-                  sqlQuery: sqlQuery
+                  sqlQuery: sqlQuery,
+                  queryResults: queryResults
                 })}\n\n`)
               );
 
@@ -221,10 +236,31 @@ export async function POST(
       const fastApiData = await fastApiResponse.json();
       console.log('FastAPI Response:', fastApiData);
 
+      // Handle array response (FastAPI returns array of query results)
+      let queryResults = [];
+      let assistantMessage = '';
+      let sqlQuery = '';
+
+      if (Array.isArray(fastApiData)) {
+        // FastAPI returns array directly
+        queryResults = fastApiData;
+
+        // Extract formatted_result from first result for assistant message
+        if (queryResults.length > 0 && queryResults[0].formatted_result) {
+          assistantMessage = queryResults[0].formatted_result;
+          sqlQuery = queryResults[0].sql_generated || '';
+        }
+      } else {
+        // Handle object response
+        assistantMessage = fastApiData.response || fastApiData.message || fastApiData.formatted_result || '';
+        sqlQuery = fastApiData.sqlQuery || fastApiData.sql_query || '';
+        queryResults = fastApiData.queryResults || fastApiData.results || [];
+      }
+
       // Update message with assistant response
-      messageDoc.assistantMessage = fastApiData.response || fastApiData.message || 'No response from AI';
-      messageDoc.sqlQuery = fastApiData.sqlQuery || fastApiData.sql_query;
-      messageDoc.queryResults = fastApiData.queryResults || fastApiData.results;
+      messageDoc.assistantMessage = assistantMessage || 'Query executed successfully';
+      messageDoc.sqlQuery = sqlQuery;
+      messageDoc.queryResults = queryResults;
       await messageDoc.save();
 
       // Update chat's lastMessageAt and title

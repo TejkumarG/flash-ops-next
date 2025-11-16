@@ -213,20 +213,26 @@ export default function DatabasesPage() {
     }
   };
 
-  const handleSync = async (databaseId: string) => {
+  const handleSync = async (databaseId: string, forceRegenerate: boolean = false) => {
     setSyncingIds(prev => new Set(prev).add(databaseId));
 
     try {
       const response = await fetch('/api/databases/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ databaseId }),
+        body: JSON.stringify({
+          databaseId,
+          forceRegenerate
+        }),
       });
 
       const data = await response.json();
 
       if (response.ok) {
-        toast.success(data.message || 'Sync started successfully!');
+        const message = forceRegenerate
+          ? 'Force re-sync completed successfully!'
+          : data.message || 'Sync started successfully!';
+        toast.success(message);
         fetchDatabases();
         // Poll for updates
         const interval = setInterval(() => {
@@ -646,9 +652,10 @@ export default function DatabasesPage() {
                       )}
                     </button>
                     <button
-                      onClick={() => handleSync(database._id)}
+                      onClick={() => handleSync(database._id, false)}
                       disabled={database.connectionStatus !== 'connected' || syncingIds.has(database._id) || database.syncStatus === 'syncing'}
                       className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                      title="Incremental sync - only updates if needed"
                     >
                       {syncingIds.has(database._id) || database.syncStatus === 'syncing' ? (
                         <>
@@ -659,6 +666,28 @@ export default function DatabasesPage() {
                         <>
                           <RefreshCw className="w-4 h-4" />
                           Sync
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm('Force re-sync will regenerate all embeddings. This may take longer. Continue?')) {
+                          handleSync(database._id, true);
+                        }
+                      }}
+                      disabled={database.connectionStatus !== 'connected' || syncingIds.has(database._id) || database.syncStatus === 'syncing'}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                      title="Force re-sync - regenerate all embeddings"
+                    >
+                      {syncingIds.has(database._id) || database.syncStatus === 'syncing' ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Re-syncing...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-4 h-4" />
+                          Force Re-sync
                         </>
                       )}
                     </button>

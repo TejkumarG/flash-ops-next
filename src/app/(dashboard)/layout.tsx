@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronRight,
   MoreHorizontal,
+  Key,
 } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { useEffect, useState } from 'react';
@@ -50,6 +51,7 @@ export default function DashboardLayout({
     { name: 'Databases', href: '/databases', icon: Database },
     { name: 'Teams', href: '/teams', icon: UsersRound },
     { name: 'Users', href: '/users', icon: Users },
+    { name: 'API Keys', href: '/admin/api-keys', icon: Key },
   ];
 
   // Initialize chatsExpanded from localStorage and auto-expand when on a chat page

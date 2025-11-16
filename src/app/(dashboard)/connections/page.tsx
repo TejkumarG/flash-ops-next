@@ -34,9 +34,9 @@ export default function ConnectionsPage() {
   const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
   const [formData, setFormData] = useState({
     name: '',
-    connectionType: 'postgresql',
+    connectionType: 'mssql',
     host: '',
-    port: 5432,
+    port: 1433,
     username: '',
     password: '',
   });
@@ -142,9 +142,9 @@ export default function ConnectionsPage() {
         setEditingConnection(null);
         setFormData({
           name: '',
-          connectionType: 'postgresql',
+          connectionType: 'mssql',
           host: '',
-          port: 5432,
+          port: 1433,
           username: '',
           password: '',
         });
@@ -217,9 +217,9 @@ export default function ConnectionsPage() {
             setEditingConnection(null);
             setFormData({
               name: '',
-              connectionType: 'postgresql',
+              connectionType: 'mssql',
               host: '',
-              port: 5432,
+              port: 1433,
               username: '',
               password: '',
             });
@@ -266,10 +266,10 @@ export default function ConnectionsPage() {
                   onChange={(e) => handlePortChange(e.target.value)}
                   className="w-full px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
+                  <option value="mssql">SQL Server</option>
                   <option value="postgresql">PostgreSQL</option>
                   <option value="mysql">MySQL</option>
                   <option value="mongodb">MongoDB</option>
-                  <option value="mssql">SQL Server</option>
                 </select>
               </div>
             </div>

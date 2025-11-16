@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { Users, Plus, Edit, Trash2, Check, X, Search, MoreVertical } from 'lucide-react';
+import { Users, Plus, Edit, Trash2, Check, X, Search, MoreVertical, Key } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
 interface User {
   _id: string;
@@ -22,6 +23,7 @@ interface Team {
 }
 
 export default function TeamsPage() {
+  const router = useRouter();
   const [teams, setTeams] = useState<Team[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -308,6 +310,17 @@ export default function TeamsPage() {
                             transition={{ duration: 0.1 }}
                             className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-2xl border border-gray-200 py-1 z-20 overflow-hidden"
                           >
+                            <button
+                              onClick={() => {
+                                router.push(`/teams/${team.id}/api-keys`);
+                                setOpenMenuId(null);
+                              }}
+                              className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                            >
+                              <Key className="w-4 h-4" />
+                              <span className="font-medium">API Keys</span>
+                            </button>
+                            <div className="h-px bg-gray-100 my-1" />
                             <button
                               onClick={() => {
                                 handleEditClick(team);
