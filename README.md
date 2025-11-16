@@ -58,7 +58,11 @@ A premium Next.js application for managing database connections and enabling nat
 
 6. Seed the database with an admin user:
    ```bash
-   npm run seed
+   # Option 1: Using npm script
+   npm run seed:admin
+
+   # Option 2: Using shell script
+   ./seed-admin.sh
    ```
 
 7. Run the development server:
