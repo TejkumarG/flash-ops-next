@@ -55,7 +55,6 @@ export async function POST(request: NextRequest) {
 
     // Call FastAPI to sync embeddings
     const fastApiUrl = getApiUrl(FASTAPI_ENDPOINTS.SYNC_EMBEDDINGS);
-    console.log('FastAPI Sync URL:', fastApiUrl);
 
     // Determine if this is a re-sync (force regenerate)
     // If database has already been synced before, default to false (incremental)
@@ -82,7 +81,7 @@ export async function POST(request: NextRequest) {
       }
 
       const fastApiData = await fastApiResponse.json();
-      console.log('FastAPI Sync Response:', fastApiData);
+      console.log('Sync completed:', databaseId);
 
       // Update database with sync results
       database.syncStatus = 'synced';
@@ -97,6 +96,7 @@ export async function POST(request: NextRequest) {
         indexPath: fastApiData.index_path || '',
         processingTimeMs: fastApiData.processing_time_ms || 0,
       };
+
       await database.save();
 
       return successResponse(

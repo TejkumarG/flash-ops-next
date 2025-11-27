@@ -8,6 +8,7 @@ export interface IDatabase extends Document {
   connectionId: mongoose.Types.ObjectId;
   databaseName: string;
   displayName?: string;
+  enabled: boolean;
   connectionStatus: 'connected' | 'disconnected' | 'error';
   lastConnectionTest?: Date;
   syncStatus: 'synced' | 'yet_to_sync' | 'syncing' | 'error';
@@ -37,6 +38,10 @@ const DatabaseSchema = new Schema<IDatabase>(
     displayName: {
       type: String,
       trim: true,
+    },
+    enabled: {
+      type: Boolean,
+      default: true,
     },
     connectionStatus: {
       type: String,
@@ -78,6 +83,7 @@ DatabaseSchema.index({ connectionId: 1 });
 DatabaseSchema.index({ createdBy: 1 });
 DatabaseSchema.index({ connectionStatus: 1 });
 DatabaseSchema.index({ syncStatus: 1 });
+DatabaseSchema.index({ enabled: 1 });
 
 /**
  * Database Model

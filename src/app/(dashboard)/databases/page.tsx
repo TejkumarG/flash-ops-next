@@ -1,14 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Database as DatabaseIcon, Trash2, Loader2, CheckCircle, XCircle, AlertCircle, RefreshCw, Plug, Shield, X, MoreVertical, Edit2 } from 'lucide-react';
+import { Plus, Database as DatabaseIcon, Trash2, Loader2, CheckCircle, XCircle, AlertCircle, RefreshCw, Plug, Shield, X, MoreVertical, Edit2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Database {
   _id: string;
   databaseName: string;
   displayName?: string;
+  enabled: boolean;
   connectionStatus: 'connected' | 'disconnected' | 'error';
   syncStatus: 'synced' | 'yet_to_sync' | 'syncing' | 'error';
   syncLastAt?: string;
@@ -55,6 +57,7 @@ interface AccessRecord {
  * Premium databases management page
  */
 export default function DatabasesPage() {
+  const router = useRouter();
   const [databases, setDatabases] = useState<Database[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -87,6 +90,22 @@ export default function DatabasesPage() {
   useEffect(() => {
     fetchDatabases();
     fetchConnections();
+
+    // Refetch databases when window gains focus (e.g., navigating back from another page)
+    const handleFocus = () => {
+      fetchDatabases();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        fetchDatabases();
+      }
+    });
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   const fetchDatabases = async () => {
@@ -653,7 +672,12 @@ export default function DatabasesPage() {
                     </button>
                     <button
                       onClick={() => handleSync(database._id, false)}
-                      disabled={database.connectionStatus !== 'connected' || syncingIds.has(database._id) || database.syncStatus === 'syncing'}
+                      disabled={
+                        database.connectionStatus !== 'connected' ||
+                        syncingIds.has(database._id) ||
+                        database.syncStatus === 'syncing' ||
+                        database.syncStatus === 'synced'
+                      }
                       className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
                       title="Incremental sync - only updates if needed"
                     >
@@ -675,7 +699,7 @@ export default function DatabasesPage() {
                           handleSync(database._id, true);
                         }
                       }}
-                      disabled={database.connectionStatus !== 'connected' || syncingIds.has(database._id) || database.syncStatus === 'syncing'}
+                      disabled={syncingIds.has(database._id) || database.syncStatus === 'syncing'}
                       className="flex items-center gap-2 px-3 py-1.5 bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
                       title="Force re-sync - regenerate all embeddings"
                     >
@@ -697,6 +721,15 @@ export default function DatabasesPage() {
                     >
                       <Shield className="w-4 h-4" />
                       Manage Access
+                    </button>
+                    <button
+                      onClick={() => router.push(`/databases/${database._id}/vectors`)}
+                      disabled={database.syncStatus !== 'synced'}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-violet-50 dark:bg-violet-900/20 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                      title={database.syncStatus !== 'synced' ? 'Sync the database first to view data' : 'View database schema and metadata'}
+                    >
+                      <Eye className="w-4 h-4" />
+                      View Data
                     </button>
                   </div>
                 </div>
