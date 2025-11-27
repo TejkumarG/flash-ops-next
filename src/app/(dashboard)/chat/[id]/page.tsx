@@ -394,7 +394,7 @@ export default function ChatViewPage() {
 
     const optimisticMessage: Message = {
       userMessage: inputMessage.trim(),
-      assistantMessage: '',
+      assistantMessage: 'loading', // Special loading state
     };
 
     // Optimistic update
@@ -496,9 +496,7 @@ export default function ChatViewPage() {
         });
       }
 
-      // Refresh chat title and trigger sidebar refresh
-      await fetchChat();
-      window.dispatchEvent(new Event('chatUpdated'));
+      // No need to refresh chat or trigger sidebar updates - avoid unnecessary API calls and screen jumping
     } catch (error: any) {
       console.error('Failed to send message:', error);
       toast.error('Failed to send message');
@@ -646,19 +644,35 @@ export default function ChatViewPage() {
                           <p className="text-xs font-semibold text-purple-600 dark:text-purple-400 mb-1.5">
                             AI Analysis
                           </p>
-                          <div className="text-base text-slate-900 dark:text-white leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {msg.assistantMessage}
-                            </ReactMarkdown>
-                          </div>
 
-                          {/* Query Results */}
-                          {msg.queryResults && msg.queryResults.length > 0 && (
-                            <div className="mt-4 space-y-4">
-                              {msg.queryResults.map((result, idx) => (
-                                <QueryResultDisplay key={idx} result={result} />
-                              ))}
+                          {/* Loading State */}
+                          {msg.assistantMessage === 'loading' ? (
+                            <div className="flex items-center gap-3 py-4">
+                              <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
+                              <div className="flex gap-1">
+                                <span className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                                <span className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                                <span className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                              </div>
+                              <span className="text-sm text-slate-600 dark:text-slate-400">Analyzing your query...</span>
                             </div>
+                          ) : (
+                            <>
+                              <div className="text-base text-slate-900 dark:text-white leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                  {msg.assistantMessage}
+                                </ReactMarkdown>
+                              </div>
+
+                              {/* Query Results */}
+                              {msg.queryResults && msg.queryResults.length > 0 && (
+                                <div className="mt-4 space-y-4">
+                                  {msg.queryResults.map((result, idx) => (
+                                    <QueryResultDisplay key={idx} result={result} />
+                                  ))}
+                                </div>
+                              )}
+                            </>
                           )}
                         </div>
                       </div>

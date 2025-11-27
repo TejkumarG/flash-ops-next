@@ -78,6 +78,7 @@ export default function ChatPage() {
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [streamingMessage, setStreamingMessage] = useState('');
+  const [isLoadingDatabases, setIsLoadingDatabases] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Fetch accessible databases
@@ -112,12 +113,15 @@ export default function ChatPage() {
 
   const fetchDatabases = async () => {
     try {
+      setIsLoadingDatabases(true);
       const response = await fetch('/api/databases');
       if (!response.ok) throw new Error('Failed to fetch databases');
       const result = await response.json();
       setDatabases(result.data?.databases || []);
     } catch (error) {
       toast.error('Failed to load databases');
+    } finally {
+      setIsLoadingDatabases(false);
     }
   };
 
@@ -243,15 +247,21 @@ export default function ChatPage() {
 
     try {
       let chatId = selectedChat?._id;
+      const isNewChat = !selectedChat; // Track if this is a new chat
 
       // If no chat selected, create a new one first
       if (!chatId) {
+        // Use first message as chat title (first 50 chars)
+        const chatTitle = optimisticMessage.userMessage.length > 50
+          ? optimisticMessage.userMessage.substring(0, 50) + '...'
+          : optimisticMessage.userMessage;
+
         const createChatResponse = await fetch('/api/chats', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             databaseIds: selectedDatabaseIds,
-            title: 'New Chat',
+            title: chatTitle,
           }),
         });
 
@@ -262,17 +272,11 @@ export default function ChatPage() {
 
         chatId = newChat._id;
 
-        // Set selected chat so UI shows chat view
-        setSelectedChat(newChat);
-
-        // Update chats list
+        // Update chats list (don't set selectedChat yet - wait until after response)
         setChats((prev) => [newChat, ...prev]);
 
         // Trigger sidebar refresh
         window.dispatchEvent(new Event('chatUpdated'));
-
-        // Wait a moment for React to re-render with the new selectedChat
-        await new Promise(resolve => setTimeout(resolve, 100));
       }
 
       // Send message and handle streaming
@@ -354,10 +358,10 @@ export default function ChatPage() {
 
         setStreamingMessage('');
         // Refresh chat list to update lastMessageAt and title
-        fetchChats();
+        await fetchChats();
 
-        // Navigate to the chat URL after streaming completes
-        if (chatId) {
+        // Navigate to chat page after response completes
+        if (isNewChat && chatId) {
           router.push(`/chat/${chatId}`);
         }
       } else {
@@ -370,7 +374,12 @@ export default function ChatPage() {
           return updated;
         });
 
-        fetchChats();
+        await fetchChats();
+
+        // Navigate to chat page after response completes
+        if (isNewChat && chatId) {
+          router.push(`/chat/${chatId}`);
+        }
       }
     } catch (error: any) {
       console.error('Failed to send message:', error);
@@ -415,6 +424,18 @@ export default function ChatPage() {
     );
   });
 
+  // Show loading screen while databases are being fetched
+  if (isLoadingDatabases) {
+    return (
+      <div className="h-[calc(100vh-8rem)] flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 text-blue-500 animate-spin mx-auto mb-4" />
+          <p className="text-slate-600 dark:text-slate-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-[calc(100vh-8rem)]">
       {!selectedChat ? (
@@ -425,6 +446,17 @@ export default function ChatPage() {
           transition={{ duration: 0.5 }}
           className="h-full backdrop-blur-xl bg-white/70 dark:bg-slate-900/70 rounded-3xl shadow-2xl border border-slate-200/50 dark:border-slate-800/50 overflow-hidden flex flex-col"
         >
+          {/* Loading overlay when sending message */}
+          {isSending && (
+            <div className="absolute inset-0 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm z-50 flex items-center justify-center rounded-3xl">
+              <div className="text-center">
+                <Loader2 className="w-16 h-16 text-blue-500 animate-spin mx-auto mb-4" />
+                <p className="text-xl font-semibold text-slate-900 dark:text-white mb-2">Sending message...</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400">AI is analyzing your query</p>
+              </div>
+            </div>
+          )}
+
           {/* Gradient overlay */}
           <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 via-transparent to-indigo-500/5 pointer-events-none rounded-3xl" />
 
