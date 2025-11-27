@@ -70,70 +70,51 @@ export async function queryVectorsByDatabaseId(
       collection_name: MILVUS_COLLECTION,
     });
 
-    // Build filter expression
-    let expr = `database_id == "${databaseId}"`;
-
-    if (search) {
-      // Add search filter for table_name or description
-      expr += ` && (table_name like "%${search}%" || description like "%${search}%")`;
-    }
-
+    // Build filter expression (Milvus doesn't support LIKE, so we'll filter in Node.js)
+    const expr = `database_id == "${databaseId}"`;
     console.log(`[Milvus] Query expression: ${expr}`);
 
-    // First, let's check what database_id values exist in the collection
-    try {
-      const allDbIdsResult = await client.query({
-        collection_name: MILVUS_COLLECTION,
-        expr: '', // Empty expression to get all records
-        output_fields: ['database_id', 'table_name'],
-        limit: 100,
-      });
-
-      console.log(`[Milvus] Total records in first query:`, allDbIdsResult.data?.length || 0);
-      const uniqueDbIds = [...new Set(allDbIdsResult.data?.map((v: any) => v.database_id) || [])];
-      console.log(`[Milvus] Unique database_id values in collection:`, uniqueDbIds);
-      console.log(`[Milvus] Sample records:`, allDbIdsResult.data?.slice(0, 3));
-      console.log(`[Milvus] Looking for database_id: ${databaseId}`);
-      console.log(`[Milvus] Match found:`, uniqueDbIds.includes(databaseId));
-    } catch (err) {
-      console.log(`[Milvus] Error getting all database_ids:`, err);
-    }
-
-    // Query vectors - use '*' to get all fields
-    console.log(`[Milvus] Querying with limit: ${limit}, offset: ${offset}`);
+    // Get ALL vectors for this database (up to max limit)
+    console.log(`[Milvus] Fetching all vectors for database...`);
 
     const queryResult = await client.query({
       collection_name: MILVUS_COLLECTION,
       expr: expr,
       output_fields: ['*'],
-      limit: limit,
-      offset: offset,
+      limit: 16384, // Get all records
     });
 
     console.log(`[Milvus] Query result status:`, queryResult.status);
-    console.log(`[Milvus] Query result data length:`, queryResult.data?.length);
-    console.log(`[Milvus] Sample vector data:`, JSON.stringify(queryResult.data?.[0]));
+    console.log(`[Milvus] Total vectors from Milvus:`, queryResult.data?.length);
 
-    const vectors = queryResult.data || [];
-    console.log(`[Milvus] Query returned ${vectors.length} vectors`);
+    let allVectors = queryResult.data || [];
 
-    // Get unique tables
-    const tables = [...new Set(vectors.map((v: any) => v.table_name))];
-    console.log(`[Milvus] Found ${tables.length} unique tables:`, tables);
+    // Filter by search query in Node.js (case-insensitive)
+    if (search) {
+      const searchLower = search.toLowerCase();
+      console.log(`[Milvus] Filtering by search term: "${search}"`);
 
-    // Get total count
-    const countResult = await client.query({
-      collection_name: MILVUS_COLLECTION,
-      expr: expr,
-      output_fields: ['id'],
-      limit: 16384, // Max limit for count
-    });
+      allVectors = allVectors.filter((v: any) => {
+        const tableName = (v.table_name || '').toLowerCase();
+        const description = (v.text || '').toLowerCase();
+        return tableName.includes(searchLower) || description.includes(searchLower);
+      });
 
-    const total = countResult.data?.length || 0;
-    console.log(`[Milvus] Total count: ${total}`);
+      console.log(`[Milvus] Vectors after search filter: ${allVectors.length}`);
+    }
+
+    // Apply pagination to filtered results
+    const total = allVectors.length;
+    const paginatedVectors = allVectors.slice(offset, offset + limit);
+
+    console.log(`[Milvus] Total after filter: ${total}, returning ${paginatedVectors.length} vectors (offset: ${offset}, limit: ${limit})`);
+
+    // Get unique tables from paginated results
+    const tables = [...new Set(paginatedVectors.map((v: any) => v.table_name))];
+    console.log(`[Milvus] Found ${tables.length} unique tables in current page`);
 
     return {
-      vectors: vectors.map((v: any) => {
+      vectors: paginatedVectors.map((v: any) => {
         // Parse the text field to extract table description
         const textContent = v.text || '';
         const lines = textContent.split('\n');
@@ -151,7 +132,7 @@ export async function queryVectorsByDatabaseId(
             fullText: textContent,
             tableLine: tableNameLine,
             descriptionLine: descriptionLine,
-            columnsLine: columnsLine,
+            columnsLine: v.schema || columnsLine, // Use schema field from Milvus if available
           },
         };
       }),

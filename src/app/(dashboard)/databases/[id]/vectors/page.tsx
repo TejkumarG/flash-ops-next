@@ -12,15 +12,17 @@ import {
   Search,
   Save,
   X,
-  Check,
   Loader2,
   AlertCircle,
   Table as TableIcon,
-  Filter,
   RefreshCw,
   Download,
   Edit2,
   Ban,
+  ChevronDown,
+  Code2,
+  FileText,
+  Check,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -56,56 +58,27 @@ export default function VectorsPage() {
 
   const [database, setDatabase] = useState<DatabaseInfo | null>(null);
   const [vectors, setVectors] = useState<VectorData[]>([]);
-  const [filteredVectors, setFilteredVectors] = useState<VectorData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasData, setHasData] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedTable, setSelectedTable] = useState<string>('all');
   const [tables, setTables] = useState<string[]>([]);
-  const [total, setTotal] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editedDescriptions, setEditedDescriptions] = useState<{ [key: string]: string }>({});
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
   const [tableSkipStatus, setTableSkipStatus] = useState<TableSkipStatus>({});
   const [togglingTables, setTogglingTables] = useState<Set<string>>(new Set());
+  const [expandedSchemas, setExpandedSchemas] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 20;
+  const [totalVectors, setTotalVectors] = useState(0);
+  const [isSearching, setIsSearching] = useState(false);
+  const itemsPerPage = 50;
+
+  const totalPages = Math.ceil(totalVectors / itemsPerPage);
 
   useEffect(() => {
     fetchDatabase();
     fetchVectorData();
   }, [databaseId]);
-
-  useEffect(() => {
-    // Filter vectors based on search and table selection
-    let filtered = vectors;
-
-    if (searchQuery) {
-      filtered = filtered.filter(
-        (v) =>
-          v.table_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          v.description?.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-    }
-
-    if (selectedTable !== 'all') {
-      filtered = filtered.filter((v) => v.table_name === selectedTable);
-    }
-
-    // Sort vectors: skipped tables first, then active tables
-    filtered = filtered.sort((a, b) => {
-      const aSkipped = tableSkipStatus[a.table_name] || false;
-      const bSkipped = tableSkipStatus[b.table_name] || false;
-      // Sort skipped (true) before active (false)
-      if (aSkipped && !bSkipped) return -1;
-      if (!aSkipped && bSkipped) return 1;
-      // Within same skip status, keep original order
-      return 0;
-    });
-
-    setFilteredVectors(filtered);
-    setCurrentPage(1); // Reset to first page when filters change
-  }, [searchQuery, selectedTable, vectors, tableSkipStatus]);
 
   const fetchDatabase = async () => {
     try {
@@ -120,29 +93,35 @@ export default function VectorsPage() {
     }
   };
 
-  const fetchVectorData = async () => {
+  /**
+   * Fetch vector data from API - NO PAGE RELOAD!
+   * This function ONLY calls the API and updates React state
+   * The page stays on the same route, no navigation happens
+   */
+  const fetchVectorData = async (page: number = 1, search: string = '') => {
     setIsLoading(true);
     try {
-      const response = await fetch(`/api/databases/${databaseId}/vectors?limit=5000`);
-      const result = await response.json();
+      // Calculate offset for pagination
+      const offset = (page - 1) * itemsPerPage;
+      const searchParam = search ? `&search=${encodeURIComponent(search)}` : '';
 
-      console.log('Vector API Response:', result);
-      console.log('Has data:', result.data?.hasData);
-      console.log('Total vectors:', result.data?.total);
-      console.log('Vectors count:', result.data?.vectors?.length);
+      // API call ONLY - no page navigation
+      const response = await fetch(`/api/databases/${databaseId}/vectors?limit=${itemsPerPage}&offset=${offset}${searchParam}`);
+      const result = await response.json();
 
       if (response.ok && result.success) {
         const vectorsData = result.data.vectors || [];
+
+        // Update state ONLY - no page reload
         setVectors(vectorsData);
-        setFilteredVectors(vectorsData);
         setHasData(result.data.hasData);
-        setTotal(result.data.total || 0);
+        setTotalVectors(result.data.total || 0);
 
         // Extract unique table names
         const uniqueTables = [...new Set(vectorsData.map((v: VectorData) => v.table_name))] as string[];
         setTables(uniqueTables);
 
-        // Initialize skip status from actual vector data
+        // Initialize skip status
         const skipStatus: TableSkipStatus = {};
         uniqueTables.forEach((table) => {
           const tableVector = vectorsData.find((v: VectorData) => v.table_name === table);
@@ -154,7 +133,6 @@ export default function VectorsPage() {
           toast.info(result.data.message || 'No vector data available');
         }
       } else {
-        console.error('API error:', result);
         toast.error(result.message || 'Failed to fetch vector data');
         setHasData(false);
       }
@@ -164,7 +142,38 @@ export default function VectorsPage() {
       setHasData(false);
     } finally {
       setIsLoading(false);
+      setIsSearching(false);
     }
+  };
+
+  /**
+   * Handle search - NO PAGE RELOAD!
+   * Calls API and updates state only
+   */
+  const handleSearch = async () => {
+    // Prevent any accidental form submission
+    setIsSearching(true);
+    setCurrentPage(1);
+
+    // API call only - no navigation
+    await fetchVectorData(1, searchQuery);
+  };
+
+  /**
+   * Handle page change (Next/Previous/Page Number) - NO PAGE RELOAD!
+   * This is CLIENT-SIDE ONLY pagination
+   * Only calls API and updates React state
+   * Zero page navigation or refresh
+   */
+  const handlePageChange = (newPage: number) => {
+    // Update page number in state
+    setCurrentPage(newPage);
+
+    // Fetch new data via API - NO PAGE RELOAD
+    fetchVectorData(newPage, searchQuery);
+
+    // Smooth scroll to top (visual effect only)
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleEditStart = (vector: VectorData) => {
@@ -211,8 +220,6 @@ export default function VectorsPage() {
 
       if (response.ok) {
         toast.success('Description updated successfully');
-
-        // Update local state
         setVectors((prev) =>
           prev.map((v) =>
             v.id === vector.id
@@ -221,8 +228,6 @@ export default function VectorsPage() {
           )
         );
         setEditingId(null);
-
-        // Remove from edited descriptions
         const newDescriptions = { ...editedDescriptions };
         delete newDescriptions[vector.id];
         setEditedDescriptions(newDescriptions);
@@ -244,7 +249,6 @@ export default function VectorsPage() {
 
   const handleToggleTableSkip = async (tableName: string) => {
     setTogglingTables(new Set(togglingTables).add(tableName));
-
     const newSkipStatus = !tableSkipStatus[tableName];
 
     try {
@@ -257,14 +261,10 @@ export default function VectorsPage() {
 
       if (response.ok) {
         toast.success(`Table ${newSkipStatus ? 'skipped' : 'unskipped'} successfully`);
-
-        // Update table skip status
         setTableSkipStatus({
           ...tableSkipStatus,
           [tableName]: newSkipStatus,
         });
-
-        // Update vectors state to reflect the change
         setVectors((prev) =>
           prev.map((v) =>
             v.table_name === tableName
@@ -288,8 +288,20 @@ export default function VectorsPage() {
     }
   };
 
+  const toggleSchema = (vectorId: string) => {
+    setExpandedSchemas((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(vectorId)) {
+        newSet.delete(vectorId);
+      } else {
+        newSet.add(vectorId);
+      }
+      return newSet;
+    });
+  };
+
   const exportToJSON = () => {
-    const dataStr = JSON.stringify(filteredVectors, null, 2);
+    const dataStr = JSON.stringify(vectors, null, 2);
     const dataBlob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(dataBlob);
     const link = document.createElement('a');
@@ -300,7 +312,37 @@ export default function VectorsPage() {
     toast.success('Exported vector data');
   };
 
-  if (isLoading) {
+  // Generate page numbers for pagination
+  const getPageNumbers = () => {
+    const pages = [];
+    const maxVisible = 5;
+
+    if (totalPages <= maxVisible) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      if (currentPage <= 3) {
+        for (let i = 1; i <= 4; i++) pages.push(i);
+        pages.push('...');
+        pages.push(totalPages);
+      } else if (currentPage >= totalPages - 2) {
+        pages.push(1);
+        pages.push('...');
+        for (let i = totalPages - 3; i <= totalPages; i++) pages.push(i);
+      } else {
+        pages.push(1);
+        pages.push('...');
+        for (let i = currentPage - 1; i <= currentPage + 1; i++) pages.push(i);
+        pages.push('...');
+        pages.push(totalPages);
+      }
+    }
+
+    return pages;
+  };
+
+  if (isLoading && currentPage === 1) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
@@ -313,18 +355,13 @@ export default function VectorsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Breadcrumb Navigation */}
+      {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
-        <Link
-          href="/databases"
-          className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-        >
+        <Link href="/databases" className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
           Databases
         </Link>
         <ChevronRight className="w-4 h-4 text-slate-400" />
-        <span className="text-slate-600 dark:text-slate-400">
-          {database?.name || 'Database'}
-        </span>
+        <span className="text-slate-600 dark:text-slate-400">{database?.name || 'Database'}</span>
         <ChevronRight className="w-4 h-4 text-slate-400" />
         <span className="text-slate-900 dark:text-white font-medium">View Data</span>
       </div>
@@ -340,7 +377,7 @@ export default function VectorsPage() {
         <span className="text-sm font-medium">Back to Databases</span>
       </motion.button>
 
-      {/* Database Info Card */}
+      {/* Header Card */}
       {database && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -354,10 +391,10 @@ export default function VectorsPage() {
               </div>
               <div>
                 <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-1">
-                  {database.name} - View Data
+                  {database.name}
                 </h2>
                 <p className="text-slate-600 dark:text-slate-400">
-                  View and manage table embeddings, schemas, and metadata
+                  Page {currentPage} of {totalPages} • {totalVectors} total embeddings
                 </p>
               </div>
             </div>
@@ -365,7 +402,7 @@ export default function VectorsPage() {
               <motion.button
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                onClick={fetchVectorData}
+                onClick={() => fetchVectorData(currentPage, searchQuery)}
                 disabled={isLoading}
                 className="flex items-center gap-2 px-5 py-3 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl font-semibold transition-all"
               >
@@ -376,354 +413,354 @@ export default function VectorsPage() {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={exportToJSON}
-                disabled={!hasData || filteredVectors.length === 0}
+                disabled={!hasData || vectors.length === 0}
                 className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-semibold shadow-lg shadow-blue-500/25 transition-all disabled:opacity-50"
               >
                 <Download className="w-5 h-5" />
-                Export Data
+                Export
               </motion.button>
             </div>
           </div>
         </motion.div>
       )}
 
-      {/* Stats Row */}
-      {hasData && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800"
+      {!hasData ? (
+        <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
+          <AlertCircle className="w-16 h-16 mx-auto text-yellow-500 mb-4" />
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
+            No Vector Data Available
+          </h3>
+          <p className="text-slate-600 dark:text-slate-400 mb-4">
+            This database hasn't been synced yet. Please sync the database to generate embeddings.
+          </p>
+          <button
+            onClick={() => router.push('/databases')}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white transition-colors"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center">
-                <TableIcon className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-              </div>
-              <div>
-                <p className="text-sm text-slate-600 dark:text-slate-400">Total Tables</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{tables.length}</p>
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
-                <Ban className="w-5 h-5 text-red-600 dark:text-red-400" />
-              </div>
-              <div>
-                <p className="text-sm text-slate-600 dark:text-slate-400">Skipped</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">
-                  {vectors.filter((v) => v.skipped).length}
-                </p>
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
-                <AlertCircle className="w-5 h-5 text-orange-600 dark:text-orange-400" />
-              </div>
-              <div>
-                <p className="text-sm text-slate-600 dark:text-slate-400">Needs Sync</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">
-                  {vectors.filter((v) => v.needs_sync).length}
-                </p>
-              </div>
-            </div>
-          </motion.div>
+            Back to Databases
+          </button>
         </div>
-      )}
+      ) : (
+        <>
+          {/* Stats Row - Horizontal Full Width - Individual Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {/* Total Tables */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-lg">
+                  <TableIcon className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Total Tables</p>
+                  <p className="text-3xl font-bold text-slate-900 dark:text-white">{totalVectors}</p>
+                </div>
+              </div>
+            </motion.div>
 
-      {/* Filters Bar */}
-      {hasData && (
-        <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
-          <div className="flex flex-wrap gap-3">
-            {/* Search */}
-            <div className="flex-1 min-w-[200px]">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            {/* Skipped */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-red-500 to-red-600 flex items-center justify-center shadow-lg">
+                  <Ban className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Skipped</p>
+                  <p className="text-3xl font-bold text-slate-900 dark:text-white">
+                    {vectors.filter((v) => v.skipped).length}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+
+            {/* Needs Sync */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-lg">
+                  <AlertCircle className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Needs Sync</p>
+                  <p className="text-3xl font-bold text-slate-900 dark:text-white">
+                    {vectors.filter((v) => v.needs_sync).length}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+
+            {/* Current Page */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+                  <FileText className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Current Page</p>
+                  <p className="text-3xl font-bold text-slate-900 dark:text-white">
+                    {currentPage} / {totalPages}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+
+          {/* Search Bar */}
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
+            <div className="flex gap-3">
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Search tables, descriptions..."
+                  placeholder="Search tables by name or description..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                  className="w-full pl-11 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 />
               </div>
+              <button
+                onClick={handleSearch}
+                disabled={isSearching}
+                className="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg font-medium transition-all disabled:opacity-50 flex items-center gap-2"
+              >
+                {isSearching ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Searching...
+                  </>
+                ) : (
+                  <>
+                    <Search className="w-5 h-5" />
+                    Search
+                  </>
+                )}
+              </button>
             </div>
-
-            {/* Table Filter */}
-            <select
-              value={selectedTable}
-              onChange={(e) => setSelectedTable(e.target.value)}
-              className="px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-            >
-              <option value="all">All Tables ({tables.length})</option>
-              {tables.map((table) => (
-                <option key={table} value={table}>
-                  {table} ({vectors.filter((v) => v.table_name === table).length})
-                </option>
-              ))}
-            </select>
           </div>
-        </div>
-      )}
 
-      {/* Vectors List */}
-      <div className="space-y-4">
-        {!hasData ? (
-          <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
-            <AlertCircle className="w-16 h-16 mx-auto text-yellow-500 mb-4" />
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
-              No Vector Data Available
-            </h3>
-            <p className="text-slate-600 dark:text-slate-400 mb-4">
-              This database hasn't been synced yet. Please sync the database to generate embeddings.
-            </p>
-            <button
-              onClick={() => router.push('/databases')}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white transition-colors"
-            >
-              Back to Databases
-            </button>
-          </div>
-        ) : filteredVectors.length === 0 && (searchQuery || selectedTable !== 'all') ? (
-          <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
-            <Search className="w-16 h-16 mx-auto text-slate-400 mb-4" />
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
-              No Results Found
-            </h3>
-            <p className="text-slate-600 dark:text-slate-400">
-              No vectors match your current filters. Try adjusting your search or table selection.
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* Group by table */}
-            {(() => {
-              // Calculate pagination
-              const startIndex = (currentPage - 1) * itemsPerPage;
-              const endIndex = startIndex + itemsPerPage;
-              const paginatedVectors = filteredVectors.slice(startIndex, endIndex);
-              const totalPages = Math.ceil(filteredVectors.length / itemsPerPage);
-
-              return (
-                <>
-                  {tables
-                    .filter((table) => selectedTable === 'all' || table === selectedTable)
-                    .map((table) => {
-                      const tableVectors = paginatedVectors.filter((v) => v.table_name === table);
-                      if (tableVectors.length === 0) return null;
-
-                return (
+          {/* Table Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <AnimatePresence mode="wait">
+              {isLoading ? (
+                <div className="col-span-full flex justify-center py-12">
+                  <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+                </div>
+              ) : (
+                vectors.map((vector, index) => (
                   <motion.div
-                    key={table}
+                    key={vector.id}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden"
+                    exit={{ opacity: 0, y: -20 }}
+                    transition={{ delay: index * 0.03 }}
+                    className="group bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-blue-500 dark:hover:border-blue-500 transition-all hover:shadow-xl hover:shadow-blue-500/10 overflow-hidden"
                   >
-                    {/* Table Header */}
-                    <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center">
+                    {/* Card Header */}
+                    <div className="p-5 bg-gradient-to-br from-slate-50 to-blue-50 dark:from-slate-800 dark:to-blue-900/20 border-b border-slate-200 dark:border-slate-700">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
                           <TableIcon className="w-5 h-5 text-white" />
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div>
-                            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-                              {table}
-                            </h3>
-                            <p className="text-sm text-slate-600 dark:text-slate-400">
-                              Table Embedding
+
+                        {/* Toggle Switch */}
+                        <button
+                          onClick={() => handleToggleTableSkip(vector.table_name)}
+                          disabled={togglingTables.has(vector.table_name)}
+                          className="relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none disabled:opacity-50"
+                          style={{
+                            backgroundColor: !vector.skipped ? '#22c55e' : '#94a3b8'
+                          }}
+                        >
+                          {togglingTables.has(vector.table_name) ? (
+                            <span className="absolute left-1/2 -translate-x-1/2">
+                              <Loader2 className="w-3 h-3 animate-spin text-white" />
+                            </span>
+                          ) : (
+                            <span
+                              className="inline-block w-4 h-4 transform bg-white rounded-full shadow-lg transition-transform"
+                              style={{
+                                transform: !vector.skipped ? 'translateX(24px)' : 'translateX(4px)'
+                              }}
+                            />
+                          )}
+                        </button>
+                      </div>
+
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2 truncate">
+                        {vector.table_name}
+                      </h3>
+
+                      {/* Status Badges */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {vector.skipped && (
+                          <span className="px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs font-medium rounded">
+                            Skipped
+                          </span>
+                        )}
+                        {vector.needs_sync && (
+                          <span className="px-2 py-0.5 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-xs font-medium rounded">
+                            Needs Sync
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Card Body */}
+                    <div className="p-5">
+                      {editingId === vector.id ? (
+                        <div className="space-y-3">
+                          <textarea
+                            value={editedDescriptions[vector.id] || ''}
+                            onChange={(e) => handleDescriptionChange(vector.id, e.target.value)}
+                            className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            rows={6}
+                            placeholder="Enter description..."
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleSaveDescription(vector)}
+                              disabled={savingIds.has(vector.id)}
+                              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                            >
+                              {savingIds.has(vector.id) ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Save className="w-4 h-4" />
+                              )}
+                              Save
+                            </button>
+                            <button
+                              onClick={() => handleEditCancel(vector.id)}
+                              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg text-sm font-medium transition-colors"
+                            >
+                              <X className="w-4 h-4" />
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="mb-4">
+                            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">
+                              Description
+                            </p>
+                            <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed line-clamp-3">
+                              {vector.description || 'No description available'}
                             </p>
                           </div>
-                          {tableSkipStatus[table] && (
-                            <span className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs font-medium rounded">
-                              Skipped
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => handleToggleTableSkip(table)}
-                        disabled={togglingTables.has(table)}
-                        className="relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
-                        style={{
-                          backgroundColor: !tableSkipStatus[table] ? '#22c55e' : '#94a3b8'
-                        }}
-                        title={tableSkipStatus[table] ? 'Skipped - Click to activate' : 'Active - Click to skip'}
-                      >
-                        {togglingTables.has(table) ? (
-                          <span className="absolute left-1/2 -translate-x-1/2">
-                            <Loader2 className="w-4 h-4 animate-spin text-white" />
-                          </span>
-                        ) : (
-                          <span
-                            className="inline-block w-4 h-4 transform bg-white rounded-full shadow-lg transition-transform"
-                            style={{
-                              transform: !tableSkipStatus[table] ? 'translateX(24px)' : 'translateX(4px)'
-                            }}
-                          />
-                        )}
-                      </button>
-                    </div>
 
-                    {/* Table Data */}
-                    <div className="divide-y divide-slate-200 dark:divide-slate-700">
-                      {tableVectors.map((vector) => (
-                        <div key={vector.id} className="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                          <div className="flex items-start gap-4">
-                            <div className="flex-1">
-                              {editingId === vector.id ? (
-                                <div className="space-y-2">
-                                  <textarea
-                                    value={editedDescriptions[vector.id] || ''}
-                                    onChange={(e) => handleDescriptionChange(vector.id, e.target.value)}
-                                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-blue-500 rounded-lg text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                                    rows={8}
-                                    placeholder="Enter description..."
-                                  />
-                                  <div className="flex items-center gap-2">
-                                    <button
-                                      onClick={() => handleSaveDescription(vector)}
-                                      disabled={savingIds.has(vector.id)}
-                                      className="flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-                                    >
-                                      {savingIds.has(vector.id) ? (
-                                        <>
-                                          <Loader2 className="w-4 h-4 animate-spin" />
-                                          Saving...
-                                        </>
-                                      ) : (
-                                        <>
-                                          <Save className="w-4 h-4" />
-                                          Save
-                                        </>
-                                      )}
-                                    </button>
-                                    <button
-                                      onClick={() => handleEditCancel(vector.id)}
-                                      disabled={savingIds.has(vector.id)}
-                                      className="flex items-center gap-2 px-3 py-1.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-                                    >
-                                      <X className="w-4 h-4" />
-                                      Cancel
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="flex items-start justify-between gap-4">
-                                  <p className="text-sm text-slate-600 dark:text-slate-300 flex-1">
-                                    {vector.description || 'No description available'}
-                                  </p>
-                                  <button
-                                    onClick={() => handleEditStart(vector)}
-                                    className="flex items-center gap-2 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg text-sm font-medium transition-colors"
-                                  >
-                                    <Edit2 className="w-4 h-4" />
-                                    Edit
-                                  </button>
-                                </div>
-                              )}
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleEditStart(vector)}
+                              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg text-sm font-medium transition-colors"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                              Edit
+                            </button>
 
-                              {vector.metadata?.columnsLine && (
-                                <div className="mt-3">
-                                  <div className="px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
-                                      Schema
-                                    </p>
-                                    <p className="text-xs text-slate-700 dark:text-slate-300 font-mono break-all">
-                                      {vector.metadata.columnsLine}
-                                    </p>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
+                            {vector.metadata?.columnsLine && (
+                              <button
+                                onClick={() => toggleSchema(vector.id)}
+                                className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-indigo-100 dark:bg-indigo-900/30 hover:bg-indigo-200 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-sm font-medium transition-colors"
+                              >
+                                <Code2 className="w-4 h-4" />
+                                {expandedSchemas.has(vector.id) ? 'Hide' : 'View'} Schema
+                              </button>
+                            )}
                           </div>
-                        </div>
-                      ))}
+
+                          {/* Expanded Schema */}
+                          <AnimatePresence>
+                            {expandedSchemas.has(vector.id) && vector.metadata?.columnsLine && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.2 }}
+                                className="mt-4 overflow-hidden"
+                              >
+                                <div className="p-3 bg-slate-900 dark:bg-slate-950 rounded-lg">
+                                  <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
+                                    {vector.metadata.columnsLine}
+                                  </pre>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </>
+                      )}
                     </div>
                   </motion.div>
-                );
-              })}
-
-              {/* Pagination Controls */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-center gap-2 mt-6 pb-4">
-                  <button
-                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                    disabled={currentPage === 1}
-                    className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                    Previous
-                  </button>
-
-                  <div className="flex items-center gap-2">
-                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                      let pageNum;
-                      if (totalPages <= 5) {
-                        pageNum = i + 1;
-                      } else if (currentPage <= 3) {
-                        pageNum = i + 1;
-                      } else if (currentPage >= totalPages - 2) {
-                        pageNum = totalPages - 4 + i;
-                      } else {
-                        pageNum = currentPage - 2 + i;
-                      }
-
-                      return (
-                        <button
-                          key={pageNum}
-                          onClick={() => setCurrentPage(pageNum)}
-                          className={`w-10 h-10 rounded-lg font-medium transition-colors ${
-                            currentPage === pageNum
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
-                          }`}
-                        >
-                          {pageNum}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <button
-                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                    disabled={currentPage === totalPages}
-                    className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Next
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
+                ))
               )}
+            </AnimatePresence>
+          </div>
 
-              {/* Page Info */}
-              {filteredVectors.length > 0 && (
-                <div className="text-center text-sm text-slate-600 dark:text-slate-400 pb-4">
-                  Showing {startIndex + 1}-{Math.min(endIndex, filteredVectors.length)} of {filteredVectors.length} vectors
-                </div>
-              )}
-            </>
-          );
-        })()}
-          </>
-        )}
-      </div>
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 mt-8 pb-4">
+              <button
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1 || isLoading}
+                className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                Previous
+              </button>
+
+              <div className="flex items-center gap-1">
+                {getPageNumbers().map((page, index) => (
+                  typeof page === 'number' ? (
+                    <button
+                      key={index}
+                      onClick={() => handlePageChange(page)}
+                      disabled={isLoading}
+                      className={`w-10 h-10 rounded-lg font-semibold transition-all ${
+                        currentPage === page
+                          ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/30'
+                          : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  ) : (
+                    <span key={index} className="px-2 text-slate-400">
+                      {page}
+                    </span>
+                  )
+                ))}
+              </div>
+
+              <button
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage === totalPages || isLoading}
+                className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium"
+              >
+                Next
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
