@@ -46,62 +46,86 @@ export async function queryVectorsByDatabaseId(
   try {
     console.log(`[Milvus] Querying collection: ${MILVUS_COLLECTION} for database_id: ${databaseId}`);
 
-    // List all collections
-    const allCollections = await listAllCollections();
-    console.log(`[Milvus] Available collections:`, allCollections);
-
-    // Check if collection exists
-    const exists = await collectionExists(MILVUS_COLLECTION);
-    if (!exists) {
-      console.log('[Milvus] Collection does not exist');
-      return {
-        vectors: [],
-        total: 0,
-        hasData: false,
-        tables: [],
-        message: 'Collection not found in Milvus',
-      };
-    }
-
-    console.log('[Milvus] Collection exists, loading...');
-
-    // Load collection
-    await client.loadCollectionSync({
-      collection_name: MILVUS_COLLECTION,
-    });
-
-    // Build filter expression (Milvus doesn't support LIKE, so we'll filter in Node.js)
+    // Build filter expression
     const expr = `database_id == "${databaseId}"`;
     console.log(`[Milvus] Query expression: ${expr}`);
 
-    // Get ALL vectors for this database (up to max limit)
-    console.log(`[Milvus] Fetching all vectors for database...`);
+    // If NO search query, use efficient Milvus pagination
+    if (!search) {
+      console.log(`[Milvus] No search - using direct Milvus pagination`);
+
+      // Get count using Milvus count query (no data fetch)
+      const countResult = await client.query({
+        collection_name: MILVUS_COLLECTION,
+        expr: expr,
+        output_fields: ['count(*)'],
+        limit: 1,
+      });
+
+      // Fallback: if count(*) doesn't work, fetch IDs to count
+      let total = 0;
+      if (countResult.data && countResult.data[0] && countResult.data[0]['count(*)']) {
+        total = countResult.data[0]['count(*)'];
+      } else {
+        // Fallback: fetch only IDs
+        const idCountResult = await client.query({
+          collection_name: MILVUS_COLLECTION,
+          expr: expr,
+          output_fields: ['id'],
+          limit: 16384,
+        });
+        total = idCountResult.data?.length || 0;
+      }
+
+      // Get paginated data
+      const queryResult = await client.query({
+        collection_name: MILVUS_COLLECTION,
+        expr: expr,
+        output_fields: ['*'],
+        limit: limit,
+        offset: offset,
+      });
+
+      const paginatedVectors = queryResult.data || [];
+      console.log(`[Milvus] Total: ${total}, returning ${paginatedVectors.length} vectors (offset: ${offset}, limit: ${limit})`);
+
+      // Get unique tables from paginated results
+      const tables = [...new Set(paginatedVectors.map((v: any) => v.table_name))];
+
+      return {
+        vectors: paginatedVectors.map((v: any) => formatVector(v)),
+        total,
+        hasData: total > 0,
+        tables,
+        metadata: {
+          collection: MILVUS_COLLECTION,
+          database_id: databaseId,
+        },
+      };
+    }
+
+    // If search query exists, we need to fetch all and filter (Milvus doesn't support LIKE)
+    console.log(`[Milvus] Search term: "${search}" - fetching all for client-side filter`);
 
     const queryResult = await client.query({
       collection_name: MILVUS_COLLECTION,
       expr: expr,
       output_fields: ['*'],
-      limit: 16384, // Get all records
+      limit: 16384,
     });
 
-    console.log(`[Milvus] Query result status:`, queryResult.status);
-    console.log(`[Milvus] Total vectors from Milvus:`, queryResult.data?.length);
-
     let allVectors = queryResult.data || [];
+    console.log(`[Milvus] Total vectors from Milvus: ${allVectors.length}`);
 
     // Filter by search query in Node.js (case-insensitive)
-    if (search) {
-      const searchLower = search.toLowerCase();
-      console.log(`[Milvus] Filtering by search term: "${search}"`);
+    const searchLower = search.toLowerCase();
+    allVectors = allVectors.filter((v: any) => {
+      const tableName = (v.table_name || '').toLowerCase();
+      const description = (v.text || '').toLowerCase();
+      return tableName.includes(searchLower) || description.includes(searchLower);
+    });
 
-      allVectors = allVectors.filter((v: any) => {
-        const tableName = (v.table_name || '').toLowerCase();
-        const description = (v.text || '').toLowerCase();
-        return tableName.includes(searchLower) || description.includes(searchLower);
-      });
-
-      console.log(`[Milvus] Vectors after search filter: ${allVectors.length}`);
-    }
+    console.log(`[Milvus] Vectors after search filter: ${allVectors.length}`);
 
     // Apply pagination to filtered results
     const total = allVectors.length;
@@ -114,28 +138,7 @@ export async function queryVectorsByDatabaseId(
     console.log(`[Milvus] Found ${tables.length} unique tables in current page`);
 
     return {
-      vectors: paginatedVectors.map((v: any) => {
-        // Parse the text field to extract table description
-        const textContent = v.text || '';
-        const lines = textContent.split('\n');
-        const tableNameLine = lines[0] || '';
-        const descriptionLine = lines[1] || '';
-        const columnsLine = lines[2] || '';
-
-        return {
-          id: v.id || `${v.database_id}_${v.table_name}`,
-          table_name: v.table_name,
-          description: textContent,
-          needs_sync: v.needs_sync || false,
-          skipped: v.skipped || false,
-          metadata: {
-            fullText: textContent,
-            tableLine: tableNameLine,
-            descriptionLine: descriptionLine,
-            columnsLine: v.schema || columnsLine, // Use schema field from Milvus if available
-          },
-        };
-      }),
+      vectors: paginatedVectors.map((v: any) => formatVector(v)),
       total,
       hasData: total > 0,
       tables,
@@ -148,6 +151,31 @@ export async function queryVectorsByDatabaseId(
     console.error('Error querying Milvus:', error);
     throw new Error(`Failed to query vectors: ${error.message}`);
   }
+}
+
+/**
+ * Format a Milvus vector record
+ */
+function formatVector(v: any) {
+  const textContent = v.text || '';
+  const lines = textContent.split('\n');
+  const tableNameLine = lines[0] || '';
+  const descriptionLine = lines[1] || '';
+  const columnsLine = lines[2] || '';
+
+  return {
+    id: v.id || `${v.database_id}_${v.table_name}`,
+    table_name: v.table_name,
+    description: textContent,
+    needs_sync: v.needs_sync || false,
+    skipped: v.skipped || false,
+    metadata: {
+      fullText: textContent,
+      tableLine: tableNameLine,
+      descriptionLine: descriptionLine,
+      columnsLine: v.schema || columnsLine,
+    },
+  };
 }
 
 /**
@@ -200,26 +228,12 @@ export async function updateVectorDescription(
 
   try {
     console.log(`[Milvus] Updating vector for table ${tableName} in database ${databaseId}`);
-    console.log(`[Milvus] Collection: ${collectionName}`);
-    console.log(`[Milvus] New description length: ${description.length} characters`);
 
     if (!databaseId || !tableName) {
       throw new Error('database_id and table_name are required for update');
     }
 
-    // Check if collection exists
-    const exists = await collectionExists(collectionName);
-    if (!exists) {
-      throw new Error('Collection not found in Milvus');
-    }
-
-    // Load collection
-    await client.loadCollectionSync({
-      collection_name: collectionName,
-    });
-    console.log(`[Milvus] Collection loaded successfully`);
-
-    // Query by database_id and table_name (reliable approach)
+    // Query by database_id and table_name
     const expr = `database_id == "${databaseId}" && table_name == "${tableName}"`;
     console.log(`[Milvus] Query expression: ${expr}`);
 
@@ -293,19 +307,7 @@ export async function toggleTableSkipStatus(
   const client = getMilvusClient();
 
   try {
-    console.log(`[Milvus] Toggling skip status for table: ${tableName} in database: ${databaseId}`);
-    console.log(`[Milvus] New skip status: ${skipped}`);
-
-    // Check if collection exists
-    const exists = await collectionExists(collectionName);
-    if (!exists) {
-      throw new Error('Collection not found in Milvus');
-    }
-
-    // Load collection
-    await client.loadCollectionSync({
-      collection_name: collectionName,
-    });
+    console.log(`[Milvus] Toggling skip status for table: ${tableName} to ${skipped}`);
 
     // Get all vectors for this table
     const expr = `database_id == "${databaseId}" && table_name == "${tableName}"`;
