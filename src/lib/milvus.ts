@@ -154,25 +154,51 @@ export async function queryVectorsByDatabaseId(
 }
 
 /**
+ * Field description structure (matches Python backend)
+ */
+interface FieldDescription {
+  field_name: string;
+  description: string;
+}
+
+/**
  * Format a Milvus vector record
  */
 function formatVector(v: any) {
   const textContent = v.text || '';
   const lines = textContent.split('\n');
   const tableNameLine = lines[0] || '';
-  const descriptionLine = lines[1] || '';
   const columnsLine = lines[2] || '';
+
+  // Parse field_descriptions - stored as JSON string of list [{field_name, description}, ...]
+  let fieldDescriptions: FieldDescription[] = [];
+  if (v.field_descriptions) {
+    if (typeof v.field_descriptions === 'string') {
+      try {
+        fieldDescriptions = JSON.parse(v.field_descriptions);
+      } catch {
+        fieldDescriptions = [];
+      }
+    } else if (Array.isArray(v.field_descriptions)) {
+      fieldDescriptions = v.field_descriptions;
+    }
+  }
+
+  // Use the separate description field if available, otherwise fallback to text line
+  const description = v.description || lines[1] || '';
 
   return {
     id: v.id || `${v.database_id}_${v.table_name}`,
     table_name: v.table_name,
-    description: textContent,
+    description: description,
     needs_sync: v.needs_sync || false,
     skipped: v.skipped || false,
+    field_descriptions: fieldDescriptions,
+    fields_count: fieldDescriptions.length,
     metadata: {
       fullText: textContent,
       tableLine: tableNameLine,
-      descriptionLine: descriptionLine,
+      descriptionLine: description,
       columnsLine: v.schema || columnsLine,
     },
   };
@@ -218,7 +244,7 @@ export async function listAllCollections() {
  * Update vector description by database_id and table_name
  */
 export async function updateVectorDescription(
-  vectorId: string,
+  _vectorId: string,
   description: string,
   collectionName: string = MILVUS_COLLECTION,
   databaseId?: string,
@@ -292,6 +318,129 @@ export async function updateVectorDescription(
   } catch (error: any) {
     console.error('Error updating vector description:', error);
     throw new Error(`Failed to update vector description: ${error.message}`);
+  }
+}
+
+/**
+ * Update field descriptions for a table
+ * field_descriptions is stored as JSON string of list: [{field_name, description}, ...]
+ */
+export async function updateFieldDescriptions(
+  databaseId: string,
+  tableName: string,
+  fieldDescriptions: FieldDescription[],
+  collectionName: string = MILVUS_COLLECTION
+) {
+  const client = getMilvusClient();
+
+  try {
+    console.log(`[Milvus] Updating field_descriptions for table: ${tableName}`);
+
+    // Get all vectors for this table
+    const expr = `database_id == "${databaseId}" && table_name == "${tableName}"`;
+    console.log(`[Milvus] Query expression: ${expr}`);
+
+    const queryResult = await client.query({
+      collection_name: collectionName,
+      expr: expr,
+      output_fields: ['*'],
+      limit: 100,
+    });
+
+    if (!queryResult.data || queryResult.data.length === 0) {
+      throw new Error(`No vector found for table ${tableName} in database ${databaseId}`);
+    }
+
+    // Prepare updated vectors with new field_descriptions
+    const updatedVectors = queryResult.data.map((vector: any) => ({
+      ...vector,
+      field_descriptions: JSON.stringify(fieldDescriptions),
+      needs_sync: true,
+    }));
+
+    console.log(`[Milvus] Upserting ${updatedVectors.length} vectors with field_descriptions`);
+
+    const upsertResult = await client.upsert({
+      collection_name: collectionName,
+      data: updatedVectors,
+    });
+
+    console.log(`[Milvus] Upsert result:`, upsertResult);
+
+    // Flush to ensure data is persisted
+    await client.flush({
+      collection_names: [collectionName],
+    });
+
+    console.log(`[Milvus] Successfully updated field_descriptions for table ${tableName}`);
+
+    return {
+      success: true,
+      message: 'Field descriptions updated successfully',
+      fields_count: fieldDescriptions.length,
+    };
+  } catch (error: any) {
+    console.error('Error updating field descriptions:', error);
+    throw new Error(`Failed to update field descriptions: ${error.message}`);
+  }
+}
+
+/**
+ * Get field descriptions for a table
+ * Returns list format: [{field_name, description}, ...]
+ */
+export async function getFieldDescriptions(
+  databaseId: string,
+  tableName: string,
+  collectionName: string = MILVUS_COLLECTION
+) {
+  const client = getMilvusClient();
+
+  try {
+    const expr = `database_id == "${databaseId}" && table_name == "${tableName}"`;
+
+    const queryResult = await client.query({
+      collection_name: collectionName,
+      expr: expr,
+      output_fields: ['field_descriptions', 'schema', 'text', 'description'],
+      limit: 1,
+    });
+
+    if (!queryResult.data || queryResult.data.length === 0) {
+      throw new Error(`No vector found for table ${tableName}`);
+    }
+
+    const vector = queryResult.data[0];
+
+    // Parse field_descriptions - stored as JSON string of list [{field_name, description}, ...]
+    let fieldDescriptions: FieldDescription[] = [];
+    if (vector.field_descriptions) {
+      if (typeof vector.field_descriptions === 'string') {
+        try {
+          fieldDescriptions = JSON.parse(vector.field_descriptions);
+        } catch {
+          fieldDescriptions = [];
+        }
+      } else if (Array.isArray(vector.field_descriptions)) {
+        fieldDescriptions = vector.field_descriptions;
+      }
+    }
+
+    // Get schema/columns info
+    let schema = '';
+    if (vector.schema) {
+      schema = typeof vector.schema === 'string' ? vector.schema : JSON.stringify(vector.schema);
+    }
+
+    return {
+      field_descriptions: fieldDescriptions,
+      schema: schema,
+      fields_count: fieldDescriptions.length,
+      table_description: vector.description || '',
+    };
+  } catch (error: any) {
+    console.error('Error getting field descriptions:', error);
+    throw new Error(`Failed to get field descriptions: ${error.message}`);
   }
 }
 

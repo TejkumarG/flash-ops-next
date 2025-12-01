@@ -19,10 +19,8 @@ import {
   Download,
   Edit2,
   Ban,
-  ChevronDown,
   Code2,
   FileText,
-  Check,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -38,6 +36,8 @@ interface VectorData {
   };
   needs_sync?: boolean;
   skipped?: boolean;
+  field_descriptions?: Array<{ field_name: string; description: string }>;
+  fields_count?: number;
 }
 
 interface DatabaseInfo {
@@ -61,13 +61,15 @@ export default function VectorsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasData, setHasData] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [tables, setTables] = useState<string[]>([]);
+  const [_tables, setTables] = useState<string[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editedDescriptions, setEditedDescriptions] = useState<{ [key: string]: string }>({});
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
   const [tableSkipStatus, setTableSkipStatus] = useState<TableSkipStatus>({});
   const [togglingTables, setTogglingTables] = useState<Set<string>>(new Set());
-  const [expandedSchemas, setExpandedSchemas] = useState<Set<string>>(new Set());
+  const [textDialogOpen, setTextDialogOpen] = useState(false);
+  const [textDialogContent, setTextDialogContent] = useState('');
+  const [textDialogTableName, setTextDialogTableName] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalVectors, setTotalVectors] = useState(0);
   const [isSearching, setIsSearching] = useState(false);
@@ -288,16 +290,16 @@ export default function VectorsPage() {
     }
   };
 
-  const toggleSchema = (vectorId: string) => {
-    setExpandedSchemas((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(vectorId)) {
-        newSet.delete(vectorId);
-      } else {
-        newSet.add(vectorId);
-      }
-      return newSet;
-    });
+  const openTextDialog = (vector: VectorData) => {
+    setTextDialogContent(vector.metadata?.fullText || vector.description || '');
+    setTextDialogTableName(vector.table_name);
+    setTextDialogOpen(true);
+  };
+
+  const closeTextDialog = () => {
+    setTextDialogOpen(false);
+    setTextDialogContent('');
+    setTextDialogTableName('');
   };
 
   const exportToJSON = () => {
@@ -360,8 +362,6 @@ export default function VectorsPage() {
         <Link href="/databases" className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
           Databases
         </Link>
-        <ChevronRight className="w-4 h-4 text-slate-400" />
-        <span className="text-slate-600 dark:text-slate-400">{database?.name || 'Database'}</span>
         <ChevronRight className="w-4 h-4 text-slate-400" />
         <span className="text-slate-900 dark:text-white font-medium">View Data</span>
       </div>
@@ -658,6 +658,7 @@ export default function VectorsPage() {
                         </div>
                       ) : (
                         <>
+                          {/* Description Section */}
                           <div className="mb-4">
                             <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">
                               Description
@@ -667,7 +668,16 @@ export default function VectorsPage() {
                             </p>
                           </div>
 
-                          <div className="flex gap-2">
+                          {/* Fields Count Badge */}
+                          <div className="mb-4">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs font-medium rounded-full">
+                              <Code2 className="w-3 h-3" />
+                              {vector.fields_count || 0} Fields
+                            </span>
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="flex gap-2 flex-wrap">
                             <button
                               onClick={() => handleEditStart(vector)}
                               className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg text-sm font-medium transition-colors"
@@ -676,35 +686,23 @@ export default function VectorsPage() {
                               Edit
                             </button>
 
-                            {vector.metadata?.columnsLine && (
-                              <button
-                                onClick={() => toggleSchema(vector.id)}
-                                className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-indigo-100 dark:bg-indigo-900/30 hover:bg-indigo-200 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-sm font-medium transition-colors"
-                              >
-                                <Code2 className="w-4 h-4" />
-                                {expandedSchemas.has(vector.id) ? 'Hide' : 'View'} Schema
-                              </button>
-                            )}
+                            <button
+                              onClick={() => openTextDialog(vector)}
+                              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-sm font-medium transition-colors"
+                            >
+                              <FileText className="w-4 h-4" />
+                              View Text
+                            </button>
                           </div>
 
-                          {/* Expanded Schema */}
-                          <AnimatePresence>
-                            {expandedSchemas.has(vector.id) && vector.metadata?.columnsLine && (
-                              <motion.div
-                                initial={{ height: 0, opacity: 0 }}
-                                animate={{ height: 'auto', opacity: 1 }}
-                                exit={{ height: 0, opacity: 0 }}
-                                transition={{ duration: 0.2 }}
-                                className="mt-4 overflow-hidden"
-                              >
-                                <div className="p-3 bg-slate-900 dark:bg-slate-950 rounded-lg">
-                                  <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
-                                    {vector.metadata.columnsLine}
-                                  </pre>
-                                </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
+                          {/* Fields Link */}
+                          <Link
+                            href={`/databases/${databaseId}/vectors/${encodeURIComponent(vector.table_name)}/fields`}
+                            className="mt-3 flex items-center justify-center gap-2 px-3 py-2 bg-indigo-100 dark:bg-indigo-900/30 hover:bg-indigo-200 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-sm font-medium transition-colors"
+                          >
+                            <Code2 className="w-4 h-4" />
+                            Edit Fields Descriptions
+                          </Link>
                         </>
                       )}
                     </div>
@@ -761,6 +759,69 @@ export default function VectorsPage() {
           )}
         </>
       )}
+
+      {/* Text Content Dialog */}
+      <AnimatePresence>
+        {textDialogOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={closeTextDialog}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[80vh] overflow-hidden"
+            >
+              {/* Dialog Header */}
+              <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center">
+                    <FileText className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-slate-900 dark:text-white">
+                      Semantic Text Content
+                    </h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      {textDialogTableName}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={closeTextDialog}
+                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5 text-slate-500" />
+                </button>
+              </div>
+
+              {/* Dialog Content */}
+              <div className="p-4 overflow-y-auto max-h-[60vh]">
+                <div className="p-4 bg-slate-900 dark:bg-slate-950 rounded-xl">
+                  <pre className="text-sm text-green-400 font-mono whitespace-pre-wrap break-words">
+                    {textDialogContent || 'No text content available'}
+                  </pre>
+                </div>
+              </div>
+
+              {/* Dialog Footer */}
+              <div className="flex justify-end p-4 border-t border-slate-200 dark:border-slate-700">
+                <button
+                  onClick={closeTextDialog}
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

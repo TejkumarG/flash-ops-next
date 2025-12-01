@@ -31,6 +31,7 @@ export default function ConnectionsPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
   const [formData, setFormData] = useState({
     name: '',
@@ -399,59 +400,22 @@ export default function ConnectionsPage() {
                 <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center">
                   <Database className="w-6 h-6 text-white" />
                 </div>
-                <div className="relative">
-                  <motion.button
+                <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     onClick={(e) => {
                       e.stopPropagation();
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setMenuPosition({
+                        top: rect.bottom + 8,
+                        left: rect.right - 224, // 224 = w-56 (14rem)
+                      });
                       setOpenMenuId(openMenuId === connection._id ? null : connection._id);
                     }}
-                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all"
+                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-xl transition-all"
                   >
                     <MoreVertical className="w-5 h-5" />
                   </motion.button>
-
-                  <AnimatePresence>
-                    {openMenuId === connection._id && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-10"
-                          onClick={() => setOpenMenuId(null)}
-                        />
-                        <motion.div
-                          initial={{ opacity: 0, scale: 0.95, y: -10 }}
-                          animate={{ opacity: 1, scale: 1, y: 0 }}
-                          exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                          transition={{ duration: 0.1 }}
-                          className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-2xl border border-gray-200 py-1 z-20 overflow-hidden"
-                        >
-                          <button
-                            onClick={() => {
-                              handleEdit(connection);
-                              setOpenMenuId(null);
-                            }}
-                            className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                            <span className="font-medium">Edit Connection</span>
-                          </button>
-                          <div className="h-px bg-gray-100 my-1" />
-                          <button
-                            onClick={() => {
-                              handleDelete(connection._id);
-                              setOpenMenuId(null);
-                            }}
-                            className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-600 hover:bg-red-50 transition-colors"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                            <span className="font-medium">Delete Connection</span>
-                          </button>
-                        </motion.div>
-                      </>
-                    )}
-                  </AnimatePresence>
-                </div>
               </div>
 
               <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
@@ -476,6 +440,57 @@ export default function ConnectionsPage() {
           ))}
         </div>
       )}
+
+      {/* Dropdown Menu - Fixed position */}
+      <AnimatePresence>
+        {openMenuId && menuPosition && (
+          <>
+            <div
+              className="fixed inset-0 z-40"
+              onClick={() => {
+                setOpenMenuId(null);
+                setMenuPosition(null);
+              }}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: -10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: -10 }}
+              transition={{ duration: 0.1 }}
+              className="fixed w-56 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-gray-200 dark:border-slate-700 py-1 z-50"
+              style={{
+                top: menuPosition.top,
+                left: menuPosition.left,
+              }}
+            >
+              <button
+                onClick={() => {
+                  const conn = connections.find(c => c._id === openMenuId);
+                  if (conn) handleEdit(conn);
+                  setOpenMenuId(null);
+                  setMenuPosition(null);
+                }}
+                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              >
+                <Edit2 className="w-4 h-4" />
+                <span className="font-medium">Edit Connection</span>
+              </button>
+              <div className="h-px bg-gray-100 dark:bg-slate-700 my-1" />
+              <button
+                onClick={() => {
+                  if (openMenuId) handleDelete(openMenuId);
+                  setOpenMenuId(null);
+                  setMenuPosition(null);
+                }}
+                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span className="font-medium">Delete Connection</span>
+              </button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
