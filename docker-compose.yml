@@ -1,5 +1,20 @@
-version: '3.8'
 services:
+  nextjs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: flash-ops-next
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - MONGODB_URI=mongodb://mongodb:27017/flash-ops
+    depends_on:
+      - mongodb
+    restart: unless-stopped
+
   mongodb:
     image: mongo:latest
     container_name: flash-ops-mongo
